@@ -101,7 +101,7 @@ class P2PBlocksOnly(BitcoinTestFramework):
         # Bump time forward to ensure m_next_inv_send_time timer pops
         self.nodes[0].setmocktime(int(time.time()) + 60)
 
-        conn.sync_send_with_ping()
+        conn.sync_with_ping()
         assert int(txid, 16) not in conn.get_invs()
 
     def check_p2p_inv_violation(self, peer):
@@ -115,7 +115,7 @@ class P2PBlocksOnly(BitcoinTestFramework):
         self.log.info('Check that txs from P2P are rejected and result in disconnect')
         spendtx = self.miniwallet.create_self_transfer()
 
-        with self.nodes[0].assert_debug_log(['transaction sent in violation of protocol peer=0']):
+        with self.nodes[0].assert_debug_log(['transaction sent in violation of protocol, disconnecting peer=0']):
             self.nodes[0].p2ps[0].send_message(msg_tx(spendtx['tx']))
             self.nodes[0].p2ps[0].wait_for_disconnect()
             assert_equal(self.nodes[0].getmempoolinfo()['size'], 0)
@@ -125,4 +125,4 @@ class P2PBlocksOnly(BitcoinTestFramework):
 
 
 if __name__ == '__main__':
-    P2PBlocksOnly().main()
+    P2PBlocksOnly(__file__).main()
