@@ -21,14 +21,18 @@
 #include <test/util/setup_common.h>
 #include <util/strencodings.h>
 
+#include <algorithm>
 #include <vector>
 
 #include <boost/test/unit_test.hpp>
 
-BOOST_FIXTURE_TEST_SUITE(crypto_tests, BasicTestingSetup)
+using namespace util::hex_literals;
+
+namespace crypto_tests {
+struct CryptoTest : BasicTestingSetup {
 
 template<typename Hasher, typename In, typename Out>
-static void TestVector(const Hasher &h, const In &in, const Out &out) {
+void TestVector(const Hasher &h, const In &in, const Out &out) {
     Out hash;
     BOOST_CHECK(out.size() == h.OUTPUT_SIZE);
     hash.resize(out.size());
@@ -42,7 +46,7 @@ static void TestVector(const Hasher &h, const In &in, const Out &out) {
         Hasher hasher(h);
         size_t pos = 0;
         while (pos < in.size()) {
-            size_t len = InsecureRandRange((in.size() - pos + 1) / 2 + 1);
+            size_t len = m_rng.randrange((in.size() - pos + 1) / 2 + 1);
             hasher.Write((const uint8_t*)in.data() + pos, len);
             pos += len;
             if (pos > 0 && pos + 2 * out.size() > in.size() && pos < in.size()) {
@@ -56,22 +60,22 @@ static void TestVector(const Hasher &h, const In &in, const Out &out) {
     }
 }
 
-static void TestSHA1(const std::string &in, const std::string &hexout) { TestVector(CSHA1(), in, ParseHex(hexout));}
-static void TestSHA256(const std::string &in, const std::string &hexout) { TestVector(CSHA256(), in, ParseHex(hexout));}
-static void TestSHA512(const std::string &in, const std::string &hexout) { TestVector(CSHA512(), in, ParseHex(hexout));}
-static void TestRIPEMD160(const std::string &in, const std::string &hexout) { TestVector(CRIPEMD160(), in, ParseHex(hexout));}
+void TestSHA1(const std::string &in, const std::string &hexout) { TestVector(CSHA1(), in, ParseHex(hexout));}
+void TestSHA256(const std::string &in, const std::string &hexout) { TestVector(CSHA256(), in, ParseHex(hexout));}
+void TestSHA512(const std::string &in, const std::string &hexout) { TestVector(CSHA512(), in, ParseHex(hexout));}
+void TestRIPEMD160(const std::string &in, const std::string &hexout) { TestVector(CRIPEMD160(), in, ParseHex(hexout));}
 
-static void TestHMACSHA256(const std::string &hexkey, const std::string &hexin, const std::string &hexout) {
+void TestHMACSHA256(const std::string &hexkey, const std::string &hexin, const std::string &hexout) {
     std::vector<unsigned char> key = ParseHex(hexkey);
     TestVector(CHMAC_SHA256(key.data(), key.size()), ParseHex(hexin), ParseHex(hexout));
 }
 
-static void TestHMACSHA512(const std::string &hexkey, const std::string &hexin, const std::string &hexout) {
+void TestHMACSHA512(const std::string &hexkey, const std::string &hexin, const std::string &hexout) {
     std::vector<unsigned char> key = ParseHex(hexkey);
     TestVector(CHMAC_SHA512(key.data(), key.size()), ParseHex(hexin), ParseHex(hexout));
 }
 
-static void TestAES256(const std::string &hexkey, const std::string &hexin, const std::string &hexout)
+void TestAES256(const std::string &hexkey, const std::string &hexin, const std::string &hexout)
 {
     std::vector<unsigned char> key = ParseHex(hexkey);
     std::vector<unsigned char> in = ParseHex(hexin);
@@ -90,7 +94,7 @@ static void TestAES256(const std::string &hexkey, const std::string &hexin, cons
     BOOST_CHECK(buf == in);
 }
 
-static void TestAES256CBC(const std::string &hexkey, const std::string &hexiv, bool pad, const std::string &hexin, const std::string &hexout)
+void TestAES256CBC(const std::string &hexkey, const std::string &hexiv, bool pad, const std::string &hexin, const std::string &hexout)
 {
     std::vector<unsigned char> key = ParseHex(hexkey);
     std::vector<unsigned char> iv = ParseHex(hexiv);
@@ -131,29 +135,29 @@ static void TestAES256CBC(const std::string &hexkey, const std::string &hexiv, b
     }
 }
 
-static void TestChaCha20(const std::string &hex_message, const std::string &hexkey, ChaCha20::Nonce96 nonce, uint32_t seek, const std::string& hexout)
+void TestChaCha20(const std::string &hex_message, const std::string &hexkey, ChaCha20::Nonce96 nonce, uint32_t seek, const std::string& hexout)
 {
-    std::vector<unsigned char> key = ParseHex(hexkey);
+    auto key = ParseHex<std::byte>(hexkey);
     assert(key.size() == 32);
-    std::vector<unsigned char> m = ParseHex(hex_message);
-    ChaCha20 rng(key.data());
-    rng.Seek64(nonce, seek);
-    std::vector<unsigned char> outres;
+    auto m = ParseHex<std::byte>(hex_message);
+    ChaCha20 rng{key};
+    rng.Seek(nonce, seek);
+    std::vector<std::byte> outres;
     outres.resize(hexout.size() / 2);
     assert(hex_message.empty() || m.size() * 2 == hexout.size());
 
     // perform the ChaCha20 round(s), if message is provided it will output the encrypted ciphertext otherwise the keystream
     if (!hex_message.empty()) {
-        rng.Crypt(m.data(), outres.data(), outres.size());
+        rng.Crypt(m, outres);
     } else {
-        rng.Keystream(outres.data(), outres.size());
+        rng.Keystream(outres);
     }
     BOOST_CHECK_EQUAL(hexout, HexStr(outres));
     if (!hex_message.empty()) {
         // Manually XOR with the keystream and compare the output
-        rng.Seek64(nonce, seek);
-        std::vector<unsigned char> only_keystream(outres.size());
-        rng.Keystream(only_keystream.data(), only_keystream.size());
+        rng.Seek(nonce, seek);
+        std::vector<std::byte> only_keystream(outres.size());
+        rng.Keystream(only_keystream);
         for (size_t i = 0; i != m.size(); i++) {
             outres[i] = m[i] ^ only_keystream[i];
         }
@@ -163,18 +167,18 @@ static void TestChaCha20(const std::string &hex_message, const std::string &hexk
     // Repeat 10x, but fragmented into 3 chunks, to exercise the ChaCha20 class's caching.
     for (int i = 0; i < 10; ++i) {
         size_t lens[3];
-        lens[0] = InsecureRandRange(hexout.size() / 2U + 1U);
-        lens[1] = InsecureRandRange(hexout.size() / 2U + 1U - lens[0]);
+        lens[0] = m_rng.randrange(hexout.size() / 2U + 1U);
+        lens[1] = m_rng.randrange(hexout.size() / 2U + 1U - lens[0]);
         lens[2] = hexout.size() / 2U - lens[0] - lens[1];
 
-        rng.Seek64(nonce, seek);
-        outres.assign(hexout.size() / 2U, 0);
+        rng.Seek(nonce, seek);
+        outres.assign(hexout.size() / 2U, {});
         size_t pos = 0;
         for (int j = 0; j < 3; ++j) {
             if (!hex_message.empty()) {
-                rng.Crypt(m.data() + pos, outres.data() + pos, lens[j]);
+                rng.Crypt(Span{m}.subspan(pos, lens[j]), Span{outres}.subspan(pos, lens[j]));
             } else {
-                rng.Keystream(outres.data() + pos, lens[j]);
+                rng.Keystream(Span{outres}.subspan(pos, lens[j]));
             }
             pos += lens[j];
         }
@@ -182,7 +186,7 @@ static void TestChaCha20(const std::string &hex_message, const std::string &hexk
     }
 }
 
-static void TestFSChaCha20(const std::string& hex_plaintext, const std::string& hexkey, uint32_t rekey_interval, const std::string& ciphertext_after_rotation)
+void TestFSChaCha20(const std::string& hex_plaintext, const std::string& hexkey, uint32_t rekey_interval, const std::string& ciphertext_after_rotation)
 {
     auto key = ParseHex<std::byte>(hexkey);
     BOOST_CHECK_EQUAL(FSChaCha20::KEYLEN, key.size());
@@ -190,7 +194,7 @@ static void TestFSChaCha20(const std::string& hex_plaintext, const std::string& 
     auto plaintext = ParseHex<std::byte>(hex_plaintext);
 
     auto fsc20 = FSChaCha20{key, rekey_interval};
-    auto c20 = ChaCha20{UCharCast(key.data())};
+    auto c20 = ChaCha20{key};
 
     std::vector<std::byte> fsc20_output;
     fsc20_output.resize(plaintext.size());
@@ -200,36 +204,35 @@ static void TestFSChaCha20(const std::string& hex_plaintext, const std::string& 
 
     for (size_t i = 0; i < rekey_interval; i++) {
         fsc20.Crypt(plaintext, fsc20_output);
-        c20.Crypt(UCharCast(plaintext.data()), UCharCast(c20_output.data()), plaintext.size());
+        c20.Crypt(plaintext, c20_output);
         BOOST_CHECK(c20_output == fsc20_output);
     }
 
     // At the rotation interval, the outputs will no longer match
     fsc20.Crypt(plaintext, fsc20_output);
     auto c20_copy = c20;
-    c20.Crypt(UCharCast(plaintext.data()), UCharCast(c20_output.data()), plaintext.size());
+    c20.Crypt(plaintext, c20_output);
     BOOST_CHECK(c20_output != fsc20_output);
 
     std::byte new_key[FSChaCha20::KEYLEN];
-    c20_copy.Keystream(UCharCast(new_key), sizeof(new_key));
-    c20.SetKey32(UCharCast(new_key));
-    c20.Seek64({0, 1}, 0);
+    c20_copy.Keystream(new_key);
+    c20.SetKey(new_key);
+    c20.Seek({0, 1}, 0);
 
     // Outputs should match again after simulating key rotation
-    c20.Crypt(UCharCast(plaintext.data()), UCharCast(c20_output.data()), plaintext.size());
+    c20.Crypt(plaintext, c20_output);
     BOOST_CHECK(c20_output == fsc20_output);
 
     BOOST_CHECK_EQUAL(HexStr(fsc20_output), ciphertext_after_rotation);
 }
 
-static void TestPoly1305(const std::string &hexmessage, const std::string &hexkey, const std::string& hextag)
+void TestPoly1305(const std::string &hexmessage, const std::string &hexkey, const std::string& hextag)
 {
     auto key = ParseHex<std::byte>(hexkey);
     auto m = ParseHex<std::byte>(hexmessage);
-    auto tag = ParseHex<std::byte>(hextag);
     std::vector<std::byte> tagres(Poly1305::TAGLEN);
     Poly1305{key}.Update(m).Finalize(tagres);
-    BOOST_CHECK(tag == tagres);
+    BOOST_CHECK_EQUAL(HexStr(tagres), hextag);
 
     // Test incremental interface
     for (int splits = 0; splits < 10; ++splits) {
@@ -237,18 +240,18 @@ static void TestPoly1305(const std::string &hexmessage, const std::string &hexke
             auto data = Span{m};
             Poly1305 poly1305{key};
             for (int chunk = 0; chunk < splits; ++chunk) {
-                size_t now = InsecureRandRange(data.size() + 1);
+                size_t now = m_rng.randrange(data.size() + 1);
                 poly1305.Update(data.first(now));
                 data = data.subspan(now);
             }
             tagres.assign(Poly1305::TAGLEN, std::byte{});
             poly1305.Update(data).Finalize(tagres);
-            BOOST_CHECK(tag == tagres);
+            BOOST_CHECK_EQUAL(HexStr(tagres), hextag);
         }
     }
 }
 
-static void TestChaCha20Poly1305(const std::string& plain_hex, const std::string& aad_hex, const std::string& key_hex, ChaCha20::Nonce96 nonce, const std::string& cipher_hex)
+void TestChaCha20Poly1305(const std::string& plain_hex, const std::string& aad_hex, const std::string& key_hex, ChaCha20::Nonce96 nonce, const std::string& cipher_hex)
 {
     auto plain = ParseHex<std::byte>(plain_hex);
     auto aad = ParseHex<std::byte>(aad_hex);
@@ -257,7 +260,7 @@ static void TestChaCha20Poly1305(const std::string& plain_hex, const std::string
 
     for (int i = 0; i < 10; ++i) {
         // During i=0, use single-plain Encrypt/Decrypt; others use a split at prefix.
-        size_t prefix = i ? InsecureRandRange(plain.size() + 1) : plain.size();
+        size_t prefix = i ? m_rng.randrange(plain.size() + 1) : plain.size();
         // Encrypt.
         std::vector<std::byte> cipher(plain.size() + AEADChaCha20Poly1305::EXPANSION);
         AEADChaCha20Poly1305 aead{key};
@@ -289,7 +292,7 @@ static void TestChaCha20Poly1305(const std::string& plain_hex, const std::string
     }
 }
 
-static void TestFSChaCha20Poly1305(const std::string& plain_hex, const std::string& aad_hex, const std::string& key_hex, uint64_t msg_idx, const std::string& cipher_hex)
+void TestFSChaCha20Poly1305(const std::string& plain_hex, const std::string& aad_hex, const std::string& key_hex, uint64_t msg_idx, const std::string& cipher_hex)
 {
     auto plain = ParseHex<std::byte>(plain_hex);
     auto aad = ParseHex<std::byte>(aad_hex);
@@ -299,7 +302,7 @@ static void TestFSChaCha20Poly1305(const std::string& plain_hex, const std::stri
 
     for (int it = 0; it < 10; ++it) {
         // During it==0 we use the single-plain Encrypt/Decrypt; others use a split at prefix.
-        size_t prefix = it ? InsecureRandRange(plain.size() + 1) : plain.size();
+        size_t prefix = it ? m_rng.randrange(plain.size() + 1) : plain.size();
         std::byte dummy_tag[FSChaCha20Poly1305::EXPANSION] = {{}};
 
         // Do msg_idx dummy encryptions to seek to the correct packet.
@@ -335,7 +338,7 @@ static void TestFSChaCha20Poly1305(const std::string& plain_hex, const std::stri
     }
 }
 
-static void TestHKDF_SHA256_32(const std::string &ikm_hex, const std::string &salt_hex, const std::string &info_hex, const std::string &okm_check_hex) {
+void TestHKDF_SHA256_32(const std::string &ikm_hex, const std::string &salt_hex, const std::string &info_hex, const std::string &okm_check_hex) {
     std::vector<unsigned char> initial_key_material = ParseHex(ikm_hex);
     std::vector<unsigned char> salt = ParseHex(salt_hex);
     std::vector<unsigned char> info = ParseHex(info_hex);
@@ -351,6 +354,10 @@ static void TestHKDF_SHA256_32(const std::string &ikm_hex, const std::string &sa
     BOOST_CHECK(HexStr(out) == okm_check_hex);
 }
 
+void TestSHA3_256(const std::string& input, const std::string& output);
+}; // struct CryptoTests
+} // namespace crypto_tests
+
 static std::string LongTestString()
 {
     std::string ret;
@@ -365,6 +372,8 @@ static std::string LongTestString()
 }
 
 const std::string test1 = LongTestString();
+
+BOOST_FIXTURE_TEST_SUITE(crypto_tests, CryptoTest)
 
 BOOST_AUTO_TEST_CASE(ripemd160_testvectors) {
     TestRIPEMD160("", "9c1185a5c5e9fc54612808977ee8f548b2258d31");
@@ -823,20 +832,20 @@ BOOST_AUTO_TEST_CASE(chacha20_testvector)
 
 BOOST_AUTO_TEST_CASE(chacha20_midblock)
 {
-    auto key = ParseHex("0000000000000000000000000000000000000000000000000000000000000000");
-    ChaCha20 c20{key.data()};
+    auto key = "0000000000000000000000000000000000000000000000000000000000000000"_hex;
+    ChaCha20 c20{key};
     // get one block of keystream
-    unsigned char block[64];
-    c20.Keystream(block, sizeof(block));
-    unsigned char b1[5], b2[7], b3[52];
-    c20 = ChaCha20{key.data()};
-    c20.Keystream(b1, 5);
-    c20.Keystream(b2, 7);
-    c20.Keystream(b3, 52);
+    std::byte block[64];
+    c20.Keystream(block);
+    std::byte b1[5], b2[7], b3[52];
+    c20 = ChaCha20{key};
+    c20.Keystream(b1);
+    c20.Keystream(b2);
+    c20.Keystream(b3);
 
-    BOOST_CHECK_EQUAL(0, memcmp(b1, block, 5));
-    BOOST_CHECK_EQUAL(0, memcmp(b2, block + 5, 7));
-    BOOST_CHECK_EQUAL(0, memcmp(b3, block + 12, 52));
+    BOOST_CHECK(std::ranges::equal(Span{block}.first(5), b1));
+    BOOST_CHECK(std::ranges::equal(Span{block}.subspan(5, 7), b2));
+    BOOST_CHECK(std::ranges::equal(Span{block}.last(52), b3));
 }
 
 BOOST_AUTO_TEST_CASE(poly1305_testvector)
@@ -919,18 +928,18 @@ BOOST_AUTO_TEST_CASE(poly1305_testvector)
     {
         // mac of the macs of messages of length 0 to 256, where the key and messages have all
         // their values set to the length.
-        auto total_key = ParseHex<std::byte>("01020304050607fffefdfcfbfaf9ffffffffffffffffffffffffffff00000000");
+        auto total_key = "01020304050607fffefdfcfbfaf9ffffffffffffffffffffffffffff00000000"_hex;
         Poly1305 total_ctx(total_key);
         for (unsigned i = 0; i < 256; ++i) {
-            std::vector<std::byte> key(32, std::byte{(uint8_t)i});
-            std::vector<std::byte> msg(i, std::byte{(uint8_t)i});
+            std::vector<std::byte> key(32, std::byte{uint8_t(i)});
+            std::vector<std::byte> msg(i, std::byte{uint8_t(i)});
             std::array<std::byte, Poly1305::TAGLEN> tag;
             Poly1305{key}.Update(msg).Finalize(tag);
             total_ctx.Update(tag);
         }
         std::vector<std::byte> total_tag(Poly1305::TAGLEN);
         total_ctx.Finalize(total_tag);
-        BOOST_CHECK(total_tag == ParseHex<std::byte>("64afe2e8d6ad7bbdd287f97c44623d39"));
+        BOOST_CHECK_EQUAL(HexStr(total_tag), "64afe2e8d6ad7bbdd287f97c44623d39");
     }
 
     // Tests with sparse messages and random keys.
@@ -1061,35 +1070,13 @@ BOOST_AUTO_TEST_CASE(hkdf_hmac_sha256_l32_tests)
                 "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d");
 }
 
-BOOST_AUTO_TEST_CASE(countbits_tests)
-{
-    FastRandomContext ctx;
-    for (unsigned int i = 0; i <= 64; ++i) {
-        if (i == 0) {
-            // Check handling of zero.
-            BOOST_CHECK_EQUAL(CountBits(0), 0U);
-        } else if (i < 10) {
-            for (uint64_t j = uint64_t{1} << (i - 1); (j >> i) == 0; ++j) {
-                // Exhaustively test up to 10 bits
-                BOOST_CHECK_EQUAL(CountBits(j), i);
-            }
-        } else {
-            for (int k = 0; k < 1000; k++) {
-                // Randomly test 1000 samples of each length above 10 bits.
-                uint64_t j = (uint64_t{1}) << (i - 1) | ctx.randbits(i - 1);
-                BOOST_CHECK_EQUAL(CountBits(j), i);
-            }
-        }
-    }
-}
-
 BOOST_AUTO_TEST_CASE(sha256d64)
 {
     for (int i = 0; i <= 32; ++i) {
         unsigned char in[64 * 32];
         unsigned char out1[32 * 32], out2[32 * 32];
         for (int j = 0; j < 64 * i; ++j) {
-            in[j] = InsecureRandBits(8);
+            in[j] = m_rng.randbits(8);
         }
         for (int j = 0; j < i; ++j) {
             CHash256().Write({in + 64 * j, 64}).Finalize({out1 + 32 * j, 32});
@@ -1099,7 +1086,7 @@ BOOST_AUTO_TEST_CASE(sha256d64)
     }
 }
 
-static void TestSHA3_256(const std::string& input, const std::string& output)
+void CryptoTest::TestSHA3_256(const std::string& input, const std::string& output)
 {
     const auto in_bytes = ParseHex(input);
     const auto out_bytes = ParseHex(output);
@@ -1113,8 +1100,8 @@ static void TestSHA3_256(const std::string& input, const std::string& output)
 
     // Reset and split randomly in 3
     sha.Reset();
-    int s1 = InsecureRandRange(in_bytes.size() + 1);
-    int s2 = InsecureRandRange(in_bytes.size() + 1 - s1);
+    int s1 = m_rng.randrange(in_bytes.size() + 1);
+    int s2 = m_rng.randrange(in_bytes.size() + 1 - s1);
     int s3 = in_bytes.size() - s1 - s2;
     sha.Write(Span{in_bytes}.first(s1)).Write(Span{in_bytes}.subspan(s1, s2));
     sha.Write(Span{in_bytes}.last(s3)).Finalize(out);
@@ -1218,7 +1205,7 @@ BOOST_AUTO_TEST_CASE(muhash_tests)
         uint256 res;
         int table[4];
         for (int i = 0; i < 4; ++i) {
-            table[i] = g_insecure_rand_ctx.randbits(3);
+            table[i] = m_rng.randbits<3>();
         }
         for (int order = 0; order < 4; ++order) {
             MuHash3072 acc;
@@ -1238,8 +1225,8 @@ BOOST_AUTO_TEST_CASE(muhash_tests)
             }
         }
 
-        MuHash3072 x = FromInt(g_insecure_rand_ctx.randbits(4)); // x=X
-        MuHash3072 y = FromInt(g_insecure_rand_ctx.randbits(4)); // x=X, y=Y
+        MuHash3072 x = FromInt(m_rng.randbits<4>()); // x=X
+        MuHash3072 y = FromInt(m_rng.randbits<4>()); // x=X, y=Y
         MuHash3072 z; // x=X, y=Y, z=1
         z *= x; // x=X, y=Y, z=X
         z *= y; // x=X, y=Y, z=X*Y
@@ -1258,7 +1245,7 @@ BOOST_AUTO_TEST_CASE(muhash_tests)
     acc *= FromInt(1);
     acc /= FromInt(2);
     acc.Finalize(out);
-    BOOST_CHECK_EQUAL(out, uint256S("10d312b100cbd32ada024a6646e40d3482fcff103668d2625f10002a607d5863"));
+    BOOST_CHECK_EQUAL(out, uint256{"10d312b100cbd32ada024a6646e40d3482fcff103668d2625f10002a607d5863"});
 
     MuHash3072 acc2 = FromInt(0);
     unsigned char tmp[32] = {1, 0};
@@ -1266,7 +1253,7 @@ BOOST_AUTO_TEST_CASE(muhash_tests)
     unsigned char tmp2[32] = {2, 0};
     acc2.Remove(tmp2);
     acc2.Finalize(out);
-    BOOST_CHECK_EQUAL(out, uint256S("10d312b100cbd32ada024a6646e40d3482fcff103668d2625f10002a607d5863"));
+    BOOST_CHECK_EQUAL(out, uint256{"10d312b100cbd32ada024a6646e40d3482fcff103668d2625f10002a607d5863"});
 
     // Test MuHash3072 serialization
     MuHash3072 serchk = FromInt(1); serchk *= FromInt(2);
@@ -1284,7 +1271,7 @@ BOOST_AUTO_TEST_CASE(muhash_tests)
     BOOST_CHECK_EQUAL(HexStr(out), HexStr(out3));
 
     // Test MuHash3072 overflow, meaning the internal data is larger than the modulus.
-    DataStream ss_max{ParseHex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")};
+    DataStream ss_max{"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"_hex};
     MuHash3072 overflowchk;
     ss_max >> overflowchk;
 

@@ -82,7 +82,7 @@ about the connection. Peers can be selected individually to view recent P2P
 messages.
 
 ```
-$ python3 contrib/tracing/p2p_monitor.py ./src/bitcoind
+$ python3 contrib/tracing/p2p_monitor.py $(pidof bitcoind)
 ```
 
 Lists selectable peers and traffic and connection information.
@@ -150,12 +150,12 @@ lost. BCC prints: `Possibly lost 2 samples` on lost messages.
 
 
 ```
-$ python3 contrib/tracing/log_raw_p2p_msgs.py ./src/bitcoind
+$ python3 contrib/tracing/log_raw_p2p_msgs.py $(pidof bitcoind)
 ```
 
 ```
 Logging raw P2P messages.
-Messages larger that about 32kb will be cut off!
+Messages larger than about 32kb will be cut off!
 Some messages might be lost!
  outbound msg 'inv' from peer 4 (outbound-full-relay, XX.XXX.XX.4:8333) with 253 bytes: 0705000000be2245c8f844c9f763748e1a7…
 …
@@ -188,7 +188,7 @@ In a different terminal, starting Bitcoin Core in SigNet mode and with
 re-indexing enabled.
 
 ```
-$ ./src/bitcoind -signet -reindex
+$ ./build/src/bitcoind -signet -reindex
 ```
 
 This produces the following output.
@@ -241,7 +241,7 @@ A BCC Python script to log the UTXO cache flushes. Based on the
 `utxocache:flush` tracepoint.
 
 ```bash
-$ python3 contrib/tracing/log_utxocache_flush.py ./src/bitcoind
+$ python3 contrib/tracing/log_utxocache_flush.py $(pidof bitcoind)
 ```
 
 ```
@@ -300,7 +300,7 @@ comprising a timestamp along with all event data available via the event's
 tracepoint.
 
 ```console
-$ python3 contrib/tracing/mempool_monitor.py ./src/bitcoind
+$ python3 contrib/tracing/mempool_monitor.py $(pidof bitcoind)
 ```
 
 ```
